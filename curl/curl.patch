@@ -1,0 +1,17 @@
+diff -rub a/Makefile.in b/Makefile.in
+--- a/Makefile.in	2026-02-01 02:55:10.847943500 +0300
++++ b/Makefile.in	2026-02-01 17:19:54.823770400 +0300
+@@ -465,12 +465,10 @@
+ 	  config_flags="$$config_flags --with-zlib=$(with_zlib)"; \
+ 	  config_flags="$$config_flags --with-zstd=$(with_zstd)"; \
+ 	  config_flags="$$config_flags --without-librtmp"; \
+-	  config_flags="$$config_flags --disable-ldap --disable-ldaps"; \
+ 	  config_flags="$$config_flags --without-libpsl"; \
+-	  config_flags="$$config_flags --enable-websockets"; \
+ 	  config_flags="$$config_flags --enable-ech"; \
+ 	  config_flags="$$config_flags --enable-ssls-export"; \
+-	  config_flags="$$config_flags --enable-ipv6"; \
++	  config_flags="$$config_flags --disable-ftp --disable-file --disable-ipfs --disable-ldap --disable-ldaps --disable-rtsp --disable-dict --disable-telnet --disable-tftp --disable-pop3 --disable-imap --disable-smb --disable-smtp --disable-gopher --disable-mqtt --disable-manual --disable-docs --disable-ipv6 --disable-verbose --disable-libcurl-option"; \
+ 	  config_flags="$$config_flags USE_CURL_SSLKEYLOGFILE=true"; \
+ 	  if test "$(static_build)" = "yes"; then \
+ 	    config_flags="$$config_flags --enable-static --disable-shared"; \

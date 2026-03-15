@@ -1,0 +1,53 @@
+﻿{
+	"name": "tapotun",
+	"dependencies": {
+		"utile": ">=1.3.22"
+	},
+	"buildTypes": {
+		"release-default": {
+			"buildOptions": [
+				"releaseMode",
+				"inline",
+				"noBoundsCheck"
+			],
+			"dflags": [
+				"-O3"
+			]
+		},
+		"release-lto": {
+			"buildOptions": [
+				"releaseMode",
+				"inline",
+				"noBoundsCheck"
+			],
+			"dflags": [
+				"-O3"
+			],
+			"dflags-linux-aarch64": [
+				"-flto=full"
+			],
+			"lflags-linux-aarch64": [
+				"$PACKAGE_DIR/curl/libcurl-impersonate_${ARCH}_lto.a",
+				"--lto=full",
+				"--lto-O3"
+			]
+		}
+	},
+	"dflags-linux": [
+		"-static"
+	],
+	"lflags-linux": [
+		"$PACKAGE_DIR/uhttpd/libmicrohttpd_$ARCH.a",
+		"$PACKAGE_DIR/curl/libcurl-impersonate_$ARCH.a",
+		"-lc++abi",
+		"-s"
+	],
+	"dflags-linux-aarch64": [
+		"-static",
+		"--frame-pointer=none",
+		"-mcpu=cortex-a53"
+	],
+	"libs-windows": [
+		"$PACKAGE_DIR/uhttpd/uhttpd"
+	]
+}
