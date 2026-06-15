@@ -10,19 +10,6 @@
 		"CC": "clang -fuse-ld=lld -w"
 	},
 	"buildTypes": {
-		"release-default": {
-			"buildOptions": [
-				"releaseMode",
-				"inline",
-				"noBoundsCheck"
-			],
-			"dflags": [
-				"-O3"
-			],
-			"lflags-linux": [
-				"-s"
-			]
-		},
 		"release-lto": {
 			"buildOptions": [
 				"releaseMode",
@@ -30,20 +17,20 @@
 				"noBoundsCheck"
 			],
 			"dflags": [
-				"-O3"
+				"-O3",
+				"--frame-pointer=none"
 			],
-			"dflags-linux-aarch64": [
+			"dflags-linux": [
 				"-flto=full"
 			],
-			"lflags-linux-aarch64": [
+			"lflags-linux": [
 				"--lto=full",
 				"--lto-O3"
 			]
 		}
 	},
 	"dflags-linux": [
-		"-static",
-		"--frame-pointer=none"
+		"-static"
 	],
 	"dflags-linux-aarch64": [
 		"-mcpu=cortex-a53"

@@ -36,12 +36,12 @@ jobs:
 
       - run: |
           apk update
-          apk add ldc dub #clang                    # build tools
+          apk add ldc dub clang                    # build tools
           apk add gcc libc++-static                # runtime
           apk add zlib-static linux-headers        # deps
 
       - run: |
-          dub build -a ${{ matrix.arch }} -b release-default
+          dub build -a ${{ matrix.arch }} -b release-lto
           mv tapotun tapotun_$(uname -m)
 
       - uses: actions/upload-artifact@v4
