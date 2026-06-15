@@ -1,39 +1,35 @@
 module utils;
 import std, utile, core.memory, core.sys.posix.arpa.inet, core.thread;
 
+import utile.tun;
+
 public import utils.mem;
 public import utils.net;
-public import utils.time;
 
 import config, packet;
 
-//version = DEBUG_PING;
+enum PING_PROTO_VERSION = 1;
 
-uint ping(ref AppTimer p, ubyte[] chunk)
+ubyte packetVersion(Blob packet)
 {
-	if (p.isFired)
-	{
-		if (chunk.length >= LENGTH_SIZE)
-		{
-			version (DEBUG_PING)
-			{
-				logger.info3!`sending ping`;
-			}
-
-			chunk[0 .. LENGTH_SIZE] = 0;
-			return LENGTH_SIZE;
-		}
-
-		logger.warn!`ping skipped, buffer too small`; // FIXME: should not happen
-	}
-
-	return 0;
+	auto p = packet.ptr + VNET_HEADER_SIZE;
+	return p[0] >> 4;
 }
 
-void pong()
+auto makePingPacket()
 {
-	version (DEBUG_PING)
-	{
-		logger.info3!`pong received`;
-	}
+	auto data = new ubyte[SLOW_SPEED_THRESHOLD * 60]; // should be larger than MIN_FRAME
+
+	auto p = data.ptr + VNET_HEADER_SIZE;
+	p[0] = PING_PROTO_VERSION << 4;
+
+	*cast(ulong*)(p + 1) = Clock.currStdTime;
+	return data;
+}
+
+auto calculateRtt(Blob packet)
+{
+	auto p = packet.ptr + VNET_HEADER_SIZE + 1;
+	ulong time = *cast(ulong*)p;
+	return hnsecs(Clock.currStdTime - time);
 }

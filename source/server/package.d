@@ -1,60 +1,23 @@
 module server;
-import std, std.digest.sha, utile, tun, tun.linux, web, config, utils, packet;
+import std, std.digest.sha, utile, config, utils, packet, utils.fw;
 
-import server.client;
+import utile.net, utile.tun, utile.curl, utile.tun.linux, utile.web, utile.net.headers;
+
+import server.client, server.handler, server.node, server.route;
+
+final:
 
 class TunServer
 {
-	this(TunConfig config)
+	this(ConfigServer config)
 	{
-		logger.info!`[SERVER] starting server %s on port %u`(config.name, config.port);
-
-		// create web server
-		_web = new WebServer(config.port);
-		_web.createClient = &createClient;
-
-		// create TUN device
-		_tun = new TunDevice(config.name);
-		_tun.configure(Settings(config.ip, config.prefix, config.mtu));
-
-		assignAddress(config.name, config.ips, config.prefix);
-
-		if (config.mark.value)
-		{
-			setupFwmark(config.name, config.mark.value, config.mark.table);
-		}
-
-		// store config
 		_conf = config;
 
-		// create routers
-		foreach (c; _conf.clients)
-		{
-			_routers ~= Router(c.ip, 32, null);
-		}
+		createTun;
+		createWebServer;
+		createReceivers;
 
-		foreach (i, c; _conf.clients)
-		{
-			auto w = _routers[i].writer;
-
-			foreach (route; c.routes)
-			{
-				_routers ~= Router(route.ip, route.prefix, w);
-			}
-
-			foreach (ip; c.sources)
-			{
-				_sources[ip] = w;
-			}
-		}
-
-		foreach (n; _conf.routes)
-		{
-			_nets ~= MRouter(n.ip, n.prefix);
-		}
-
-		sort!((a, b) => a.mask > b.mask, SwapStrategy.stable)(_nets);
-		sort!((a, b) => a.mask > b.mask, SwapStrategy.stable)(_routers);
+		configureFW(_conf.name);
 	}
 
 	~this()
@@ -63,188 +26,243 @@ class TunServer
 		_tun.destroy;
 	}
 
-	void run(ref Selector s)
+	void run(ThreeSet ts)
 	{
-		_routers.each!(a => a.writer.removeOutdated);
+		_clients.byValue.each!(a => a.run);
 
 		while (true)
 		{
-			if (auto data = _tun.read())
+			if (auto packet = _tun.read)
 			{
-				send!false(data, null);
+				if (packetVersion(packet) == 4)
+				{
+					process(_selves, packet);
+				}
 			}
 			else
 				break;
 		}
 
-		_wasC2C = false;
-		_web.run(s);
+		_runTwice = false;
+		_web.run(ts);
 
-		if (_wasC2C) // FIXME: maybe just skip the delay in the app's loop ?
+		if (_runTwice)
 		{
-			_web.run(s);
+			_web.run(ts); // FIXME: maybe just reduce the timeout of the next run?
 		}
 	}
 
-	void fdset(ref Selector s)
+	void fdset(ThreeSet ts)
 	{
-		_web.fdset(s);
-
-		FD_SET(_tun.fd, s.read);
-		s.add(_tun.fd);
+		_web.fdset(ts);
+		ts.add(OpIndex.read, _tun.fd);
 	}
 
+	@property log() => _tun.log;
 package:
-	void send(bool Client)(in ubyte[] packet, Router* client)
+	void process(NodeClient node, Blob packet)
 	{
-		static if (Client)
-		{
-			if (packet.empty) // ping
-			{
-				pong;
-				return;
-			}
-		}
+		process(_byNode[node], packet);
+	}
 
-		assert(packet.length >= MIN_FRAME && packet.length <= MAX_FRAME);
+	void touch()
+	{
+		_runTwice = true;
+	}
+
+private:
+	void process(S[] arr, Blob packet)
+	{
+		// only support IPv4 for now
+		assert(packetVersion(packet) == 4);
 
 		auto p = packet.ptr + VNET_HEADER_SIZE;
-		auto ver = p[0] >> 4;
 
-		if (ver != 4)
-			return;
+		uint src = *cast(uint*)(p + 12);
+		uint dst = *cast(uint*)(p + 16);
 
-		auto destIp = *cast(uint*)(p + 16);
+		auto q = arr.find!(a => a.ip == src);
+		auto rc = front(q.empty ? arr : q).rc;
 
-		foreach (ref r; _routers)
-		{
-			static if (Client)
-			{
-				if (r.writer is client.writer)
-					continue;
-			}
-
-			if (r.isMatch(destIp))
-			{
-				static if (Client)
-				{
-					_wasC2C = true;
-				}
-
-				return r.writer.add(packet);
-			}
-		}
-
-		auto srcIp = *cast(uint*)(p + 12);
-
-		if (auto w = _sources.get(srcIp, null))
-		{
-			bool b = true;
-
-			static if (Client)
-			{
-				if (destIp == _conf.ip)
-				{
-					b = false;
-				}
-				else
-					foreach (ref n; _nets)
-					{
-						if (n.isMatch(destIp))
-						{
-							b = false;
-							break;
-						}
-					}
-			}
-
-			if (b)
-			{
-				static if (Client)
-				{
-					_wasC2C = true;
-				}
-
-				return w.add(packet);
-			}
-		}
-
-		static if (Client)
-		{
-			_tun.write(packet);
-		}
+		_routes[rc].process(packet, dst);
 	}
 
+	void createTun()
+	{
+		_tun = new LinuxTunDevice(_conf.name, logger);
+
+		auto arr = _conf.self.ips;
+
+		auto settings = TunSettings(arr[0].ip, _conf.network.prefix, _conf.mtu);
+		_tun.configure(settings);
+
+		if (_conf.mark)
+		{
+			_tun.setupFwmark(_conf.mark, _conf.table);
+		}
+
+		_tun.assignAddress(arr[1 .. $].map!(a => a.ip).array, _conf.network.prefix);
+	}
+
+	void createWebServer()
+	{
+		_web = new WebServer(_conf.port, CONNECTION_TIMEOUT, log);
+
+		_web.setClientIP(HeaderNormalized.xForwardedFor);
+
+		_web.routes[null][null] = &onConnection;
+	}
+
+	void createReceivers()
+	{
+		Receiver[uint] byIp;
+
+		foreach (p; _conf.self.ips)
+		{
+			auto rc = new ReceiverServer(_tun);
+
+			auto peers = p
+				.peers
+				.filter!(a => a.explicit)
+				.map!(a => a.addr);
+
+			foreach (peer; peers) // FIXME : maybe just add all the routes ?
+			{
+				peer.routes.each!(a => routeAdd(_conf.name, a, log));
+			}
+
+			byIp[p.ip] = rc;
+			_selves ~= S(p.ip, rc);
+		}
+
+		foreach (p; _conf.nodes)
+		{
+			auto sc = ServerConfig(_conf.mtu, _conf.network.prefix);
+
+			foreach (addr; p.ips)
+			{
+				auto peers = addr
+					.peers
+					.filter!(a => a.explicit)
+					.map!(a => a.addr);
+
+				foreach (r; peers)
+				{
+					sc.routes ~= r.routes;
+				}
+
+				sc.ips ~= addr.ip;
+			}
+
+			// config created, now create the client
+			auto n = new NodeClient(this, sc, p.name, log);
+
+			foreach (addr; p.ips)
+			{
+				auto q = addr.ip;
+				auto rc = new ReceiverClient(n);
+
+				byIp[q] = rc;
+				_byNode[n] ~= S(q, rc);
+			}
+
+			_clients[p.token] = n;
+		}
+
+		foreach (n; _conf.nodes.chain(_conf.self.only))
+		{
+			foreach (addr; n.ips)
+			{
+				Router r;
+
+				foreach (p; addr.peers.map!(a => a.addr)) // FIXME: check if explicit ?
+				{
+					r.add(byIp[p.ip], p);
+				}
+
+				foreach (g; addr.gateway)
+				{
+					auto gw = byIp[g.ip];
+					r.add(gw);
+				}
+
+				_routes[byIp[addr.ip]] = r;
+			}
+		}
+
+		_byNode.rehash;
+		_routes.rehash;
+	}
+
+	WebHandler onConnection(WebConnection conn)
+	{
+		if (auto p = HEADER_KEY in conn.headers)
+		{
+			if (auto node = find(*p))
+			{
+				return conn.method == Method.put ? new MyPut(conn, node) : new MyGet(conn, node);
+			}
+		}
+
+		return createHandler403(conn);
+	}
+
+nothrow:
 	auto find(string token)
 	{
 		auto hash = token
 			.sha1Of
-			.toHexString
-			.toLower
+			.toHexString!(LetterCase.lower)
 			.idup;
 
-		foreach (i, ref c; _conf.clients)
+		if (auto p = hash in _clients)
 		{
-			if (c.token == hash)
-			{
-				return &_routers[i];
-			}
+			return *p;
 		}
 
 		return null;
 	}
 
-	WebClient createClient(void* conn, string url, string method)
-	{
-		if (method == `PUT`)
-		{
-			return new MyPut(conn, url, method, this);
-		}
+	// lookup
+	S[] _selves;
+	S[][NodeClient] _byNode;
 
-		return new MyGet(conn, url, method, this);
-	}
+	Router[Receiver] _routes;
 
-	bool _wasC2C;
+	// auth
+	NodeClient[string] _clients;
 
-	TunDevice _tun;
-	TunConfig _conf;
+	// clients can send packets to each other, so we have to run web server twice
+	bool _runTwice;
 
-	MRouter[] _nets;
+	// misc
+	ConfigServer _conf;
 
 	WebServer _web;
-	Router[] _routers;
-	PacketsWriter*[uint] _sources;
+	LinuxTunDevice _tun;
 }
 
-struct MRouter
+private:
+
+struct S
 {
-	@disable this();
-
-	this(uint ip, ubyte prefix)
-	{
-		net = ip;
-		mask = prefixToNetmask(prefix);
-	}
-
-	bool isMatch(uint addr) const => (addr & mask) == net;
-
-	uint net;
-	uint mask;
+	uint ip;
+	Receiver rc;
 }
 
-struct Router
+class ReceiverServer : Receiver
 {
-	@disable this();
-
-	this(uint ip, ubyte prefix, PacketsWriter* writer_)
+	this(LinuxTunDevice tun)
 	{
-		route = MRouter(ip, prefix);
-		writer = writer_ ? writer_ : new PacketsWriter(MAX_CACHED_PACKETS_SIZE);
+		_tun = tun;
 	}
 
-	MRouter route;
-	alias route this;
+	override void send(in ubyte[] packet)
+	{
+		_tun.write(packet);
+	}
 
-	MyGet client;
-	PacketsWriter* writer;
+	override bool online() const => true;
+private:
+	LinuxTunDevice _tun;
 }

@@ -1,19 +1,21 @@
 module packet.reader;
 
 import packet;
-import std, utile, web, tun, app, utils.time, config;
+import std, utile, app, config;
+
+import utile.tun;
 
 struct PacketsReader
 {
 	this() @disable;
 
-	this(void delegate(in ubyte[] packet) handler)
+	this(void delegate(in ubyte[] packet) handler) nothrow
 	{
 		onReset;
 		_handler = handler;
 	}
 
-	void onReset()
+	void onReset() nothrow
 	{
 		_len = 0;
 		_processed = -LENGTH_SIZE;
@@ -52,7 +54,7 @@ struct PacketsReader
 
 				chunk.popFront;
 
-				if (done && _len) // ping has length 0
+				if (done)
 				{
 					_len >= MIN_PACKET && _len <= MAX_PACKET || throwError!`received packet with wrong length %u`(_len);
 					_len += VNET_HEADER_SIZE;

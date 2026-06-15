@@ -34,10 +34,14 @@ jobs:
 
       - uses: actions/checkout@v4
 
-      - run: apk add ldc dub clang20 llvm lld libc-dev libc++-dev linux-headers zstd-static libc++-static
+      - run: |
+          apk update
+          apk add ldc dub clang gcc libc++-static       # build tools
+          apk add zlib-static linux-headers             # deps
 
       - run: |
-          dub build -a ${{ matrix.arch }} -b release-nobounds
+          export CC="clang -fuse-ld=lld -w"
+          dub build -a ${{ matrix.arch }} -b release-default
           mv tapotun tapotun_$(uname -m)
 
       - uses: actions/upload-artifact@v4

@@ -1,7 +1,9 @@
 module utils.net;
 
 import core.thread;
-import std, utile, core.memory, core.sys.posix.arpa.inet;
+import std, utile, config, core.memory, core.sys.posix.arpa.inet;
+
+import utile.log : Logger;
 
 version (Windows)
 {
@@ -14,103 +16,44 @@ else
 	import core.sys.posix.sys.time : timeval;
 	import core.sys.posix.sys.select : select, fd_set;
 	public import core.sys.posix.sys.select : FD_SET;
-
-	import tun.sys : _IFNAMSIZ;
-}
-
-uint prefixToNetmask(ubyte prefix)
-{
-	uint mask = prefix ? uint.max << (32 - prefix) : 0;
-	return mask.htonl;
-}
-
-string ipToString(uint ip)
-{
-	return new InternetAddress(ip.ntohl, 0).toString.stripRight(`:0`);
-}
-
-uint parseIp(string ip)
-{
-	uint res = InternetAddress.parse(ip);
-	res != InternetAddress.ADDR_NONE || throwError!`invalid IP address: %s`(ip);
-
-	return res.htonl;
-}
-
-void checkMtu(ushort mtu)
-{
-	mtu >= 68 && mtu <= 9000 || throwError!`invalid MTU size: %u`(mtu);
 }
 
 void checkTunName(string name)
 {
-	version (Posix)
-	{
-		name.length && name.length < _IFNAMSIZ || throwError!`interface name too long: %s`(name);
-	}
+	// version (Posix)
+	// {
+	// 	name.length && name.length < _IFNAMSIZ || throwError!`interface name too long: %s`(name);
+	// }
+
+	// FIXME
 }
 
-struct Selector
+string launch(string[] args...)
 {
-	void do_(Duration d)
+	auto result = args.execute;
+	result.status && throwError!`command %-(%s %) failed with code %d: %s`(args, result.status, result.output);
+	return result.output;
+}
+
+void routeAdd(string dev, Route r, SubLogger logger)
+{
+	string route = r.ip.ipToString;
+
+	if (r.prefix != 32)
 	{
-		auto ds = d.split!(`seconds`, `usecs`);
-
-		timeval tv = timeval(cast(uint)ds.seconds, cast(uint)ds.usecs);
-
-		if (select(_maxFd + 1, asPtr.expand, &tv) < 0)
-		{
-			version (Posix)
-			{
-				errno == EINTR || throwError!`select failed: %d`(errno);
-			}
-			else
-			{
-				auto err = WSAGetLastError();
-
-				if (err != WSAEINVAL || _sets[].any!(a => a.fd_count))
-				{
-					throwError!`select failed: %d`(err);
-				}
-
-				Thread.sleep(1.msecs);
-			}
-		}
+		route ~= '/' ~ r.prefix.to!string;
 	}
 
-	auto asPtr(T = fd_set)()
+	string s = launch(`ip`, `route`, `show`, route);
+
+	if (s.canFind(route))
 	{
-		alias U = Tuple!(T*, T*, T*);
-
-		// FIXME : for curl
-		//static assert(T.sizeof == fd_set.sizeof);
-
-		return U(_sets[]
-				.map!((ref a) => cast(T*)&a)
-				.staticArray!3);
+		logger.info3!`route %s already exists, skip adding`(route);
 	}
-
-	ref asRef(T = fd_set)()
+	else
 	{
-		alias U = Tuple!(T, T, T);
-		static assert(U.sizeof == _sets.sizeof);
+		logger.info3!`adding route %s`(route);
 
-		return cast(U)_sets;
+		launch(`ip`, `route`, `add`, route, `dev`, dev);
 	}
-
-	void add(int maxfd)
-	{
-		if (maxfd > _maxFd)
-		{
-			_maxFd = maxfd;
-		}
-	}
-
-	auto read() => &_sets[0];
-	auto write() => &_sets[1];
-	auto except() => &_sets[2];
-
-private:
-	fd_set[3] _sets;
-	int _maxFd = -1;
 }

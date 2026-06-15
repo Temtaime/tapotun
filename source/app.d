@@ -1,96 +1,104 @@
 import std, core.thread, core.memory, utile;
-import tun, utils, web, curl, utils, config, client, server;
+import utile.tun, utils, utils, config, utile.updater, client, server, update;
 
-__gshared App myApp;
+import utile.net, utile.curl;
 
-class App
+final class App
 {
-	this(string config)
+	this(Requests req)
 	{
-		logger.info!`VPN application starting ...`;
-
-		_config = config;
-		_req = new Requests;
+		_req = req;
 	}
 
 	~this()
 	{
 		_clients.each!(a => a.destroy);
 		_servers.each!(a => a.destroy);
-
-		_req.destroy;
 	}
 
-	void run()
+	int run(string[] args)
 	{
-		while (_run)
+		if (args.length != 2)
 		{
-			// update app time
-			appTime.update;
-
-			// process interfaces
-			work;
-
-			// process curl jobs
-			_req.run;
-		}
-	}
-
-private:
-	void work()
-	{
-		if (_config.empty)
-		{
-			loop;
+			logger.error!`usage: %s <config file>`(args.front);
 		}
 		else
 		{
-			configure;
-		}
-	}
+			auto config = args.back;
 
-	void configure()
-	{
-		foreach (t; _config.parseConfig)
-		{
-			if (t.port)
+			if (config.isFile)
 			{
-				_servers ~= new TunServer(t);
+				configure(config);
+				loop;
+				return 0;
 			}
 			else
 			{
-				_clients ~= new TunClient(_req, t);
+				logger.error!`%s is not a file`(config);
 			}
 		}
 
-		_config = null;
+		return 1;
+	}
+
+	void stop()
+	{
+		_run = false;
+	}
+
+private:
+	void onNewJob(Job job)
+	{
+		job.impersonate(Browser.safari260_ios, false);
+		job.lowSpeed(SLOW_SPEED_THRESHOLD, SLOW_SPEED_TIME_WINDOW);
+
+		// use one connection for up/down to avoid issues
+		job.version_ = Alpn.v1_1_only;
+	}
+
+	void configure(string config)
+	{
+		_req.onNewJob = &onNewJob; // impersonate all requests
+		//_req.maxConcurrentStreams = 1; // use a single connection for up/down
+
+		foreach (t; config.parseConfig)
+		{
+			if (auto p = cast(ConfigServer)t)
+			{
+				_servers ~= new TunServer(p);
+			}
+			else
+			{
+				_clients ~= new TunClient(_req, cast(ConfigClient)t);
+			}
+		}
 	}
 
 	void loop()
 	{
-		// process network events
-		Selector s;
-
+		for (ThreeSet ts = new ThreeSet; _run; appTime.update)
 		{
-			_req.fdset(s); // FIXME: check if we need to move it outside the loop
+			// check for updates every UPDATE_CHECK_INTERVAL
+			checkUpdates;
 
-			_clients.each!(a => a.fdset(s));
-			_servers.each!(a => a.fdset(s));
+			// reset fd sets
+			ts.reset;
 
-			s.do_(LOOP_DELAY);
+			// add fds
+			_clients.each!(a => a.fdset(ts));
+			_servers.each!(a => a.fdset(ts));
+			_req.fdset(ts);
+
+			// wait for events
+			ts.select(LOOP_DELAY);
+
+			// process tun events
+			_clients.each!(a => a.run);
+			_servers.each!(a => a.run(ts));
+
+			// process curl events
+			_req.run;
 		}
-
-		// process TUN clients
-		_clients.each!(a => a.run);
-
-		// process TUN server
-		_servers.each!(a => a.run(s));
-	}
-
-	void onUpdate()
-	{
-		_run = false;
-		logger.info!`application updated, shutting down ...`;
 	}
 
 	Requests _req;
@@ -99,28 +107,14 @@ private:
 	TunServer[] _servers;
 
 	bool _run = true;
-	string _config;
 }
 
-void main(string[] args)
+int main(string[] args)
 {
 	logger.timeOutput = true;
 
-	if (args.length != 2)
-	{
-		return logger.error!`usage: %s <config file>`(args.front);
-	}
+	scope req = new Requests(logger);
+	scope app = new App(req);
 
-	auto config = args.back;
-
-	if (config.isFile)
-	{
-		myApp = new App(config);
-		myApp.run;
-		myApp.destroy;
-	}
-	else
-	{
-		logger.error!`%s is not a file`(config);
-	}
+	return updateAvailable(req, &app.stop) ? 0 : app.run(args);
 }

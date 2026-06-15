@@ -1,7 +1,10 @@
 ﻿{
 	"name": "tapotun",
 	"dependencies": {
-		"utile": ">=2.0.2"
+		"utile": ">=2.9.2",
+		"utile:tun": "*",
+		"utile:web": "*",
+		"utile:curl": "*"
 	},
 	"buildTypes": {
 		"release-default": {
@@ -12,6 +15,9 @@
 			],
 			"dflags": [
 				"-O3"
+			],
+			"lflags-linux": [
+				"-s"
 			]
 		},
 		"release-lto": {
@@ -27,7 +33,6 @@
 				"-flto=full"
 			],
 			"lflags-linux-aarch64": [
-				"$PACKAGE_DIR/curl/libcurl-impersonate_${ARCH}_lto.a",
 				"--lto=full",
 				"--lto-O3"
 			]
@@ -36,9 +41,6 @@
 	"dflags-linux": [
 		"-static",
 		"--frame-pointer=none"
-	],
-	"lflags-linux": [
-		"-s"
 	],
 	"dflags-linux-aarch64": [
 		"-mcpu=cortex-a53"

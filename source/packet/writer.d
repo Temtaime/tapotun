@@ -1,7 +1,9 @@
 module packet.writer;
 
 import packet;
-import std, utile, web, tun, app, utils.time, config;
+import std, utile, app, config;
+
+import utile.tun;
 
 import std.experimental.allocator.gc_allocator;
 import std.experimental.allocator.building_blocks.kernighan_ritchie;
@@ -10,7 +12,7 @@ struct PacketsWriter
 {
 	@disable this();
 
-	this(uint capacity)
+	this(uint capacity) nothrow
 	{
 		onReset;
 
@@ -18,7 +20,7 @@ struct PacketsWriter
 		_alloc.switchToFreeList;
 	}
 
-	void onReset()
+	void onReset() nothrow
 	{
 		_processed = -LENGTH_SIZE;
 	}
@@ -26,7 +28,9 @@ struct PacketsWriter
 	void removeOutdated()
 	{
 		if (_head is null)
+		{
 			return;
+		}
 
 		uint removed, total;
 
@@ -34,7 +38,7 @@ struct PacketsWriter
 		{
 			auto p = _head.next;
 
-			if (p is null || appTime.ms - p.time < PACKET_DELAY)
+			if (p is null || appTime.now - p.time < PACKET_DELAY)
 			{
 				break;
 			}
@@ -80,10 +84,7 @@ struct PacketsWriter
 
 		auto p = cast(S*)tmp.ptr;
 
-		p.size = sz;
-		p.time = appTime.ms;
-		p.next = null;
-
+		*p = S(null, appTime.now, sz);
 		data(p)[] = packet;
 
 		if (_head)
@@ -149,12 +150,10 @@ struct PacketsWriter
 private:
 	struct S
 	{
-		uint size;
-		uint time;
 		S* next;
+		MonoTime time;
+		uint size;
 	}
-
-	static assert(S.sizeof == 16);
 
 	auto data(S* p) => (cast(ubyte*)(p + 1))[0 .. p.size];
 	auto block(S* p) => (cast(ubyte*)p)[0 .. p.size + S.sizeof];

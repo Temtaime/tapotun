@@ -1,13 +1,17 @@
 module client;
 
 import std, utile;
-import tun, utils, tun.linux, curl, config, web, app;
+import utils, config, app;
+
+import utile.log : logger;
+
+import utile.tun, utile.net, utile.curl;
 
 import client.job;
 
-class TunClient
+final class TunClient
 {
-	this(Requests req, TunConfig config)
+	this(Requests req, ConfigClient config)
 	{
 		_req = req;
 		_conf = config;
@@ -15,24 +19,22 @@ class TunClient
 		_reader = new ReaderJob(this);
 		_writer = new WriterJob(this);
 
-		logger.info!`connecting to %s`(_conf.server);
+		_tun = new LinuxTunDevice(_conf.name, logger);
 	}
 
 	~this()
 	{
-		if (_tun)
-		{
-			_tun.destroy;
-		}
+		_tun.destroy;
 	}
 
-	void fdset(ref Selector s)
+	void fdset(ThreeSet ts)
 	{
-		if (_tun)
+		if (_needsConfig)
 		{
-			FD_SET(_tun.fd, s.read);
-			s.add(_tun.fd);
+			return;
 		}
+
+		ts.add(OpIndex.read, _tun.fd);
 	}
 
 	void run()
@@ -40,57 +42,82 @@ class TunClient
 		_reader.check;
 		_writer.check;
 
-		if (_tun is null)
+		if (_needsConfig)
+		{
 			return;
+		}
 
 		while (true)
 		{
-			if (auto data = _tun.read)
+			if (auto packet = _tun.read)
 			{
-				_writer.add(data);
+				if (packetVersion(packet) == 4)
+				{
+					_writer.add(packet);
+				}
 			}
 			else
 				break;
 		}
 	}
 
+	@property log() => _tun.log;
 package:
-	void onPacket(in ubyte[] data)
+	void onPacket(Blob data)
 	{
-		assert(_configured);
-
-		if (data.empty) // ping
+		if (_needsConfig)
 		{
-			pong;
+			log.error!`received a packet before tun is configured, drop it`;
+			return;
+		}
+
+		if (packetVersion(data) == PING_PROTO_VERSION)
+		{
+			_writer.add(data);
 		}
 		else
 			_tun.write(data);
 	}
 
-	void configure(in ubyte[] data)
+	void configure(Blob data)
 	{
 		auto sc = data.deserializeMem!ServerConfig;
 
-		if (_tun is null)
+		_tun.configure(TunSettings(sc.ips[0], sc.prefix, sc.mtu));
+		_tun.assignAddress(sc.ips[1 .. $], sc.prefix);
+
+		_needsConfig = false;
+
+		try
 		{
-			_tun = new TunDevice(_conf.name);
+			if (_conf.mark)
+			{
+				_tun.setupFwmark(_conf.mark, _conf.table);
+			}
+
+			foreach (r; sc.routes)
+			{
+				routeAdd(_conf.name, r, log);
+			}
+
+			// foreach (r; _conf.routes) // FIXME: force user declared routes ?
+			// {
+			// 	routeAdd(_conf.name, r, log);
+			// }
 		}
-
-		_tun.configure(Settings(sc.ip, sc.prefix, sc.mtu));
-		_configured = true;
-
-		if (_conf.mark.value)
+		catch (Exception e)
 		{
-			setupFwmark(_conf.name, _conf.mark.value, _conf.mark.table);
+			log.error!`failed to setup firewall: %s`(e.msg);
 		}
 	}
 
 	Requests _req;
-	TunConfig _conf;
 
-	TunDevice _tun;
-	bool _configured;
+	ConfigClient _conf;
+	LinuxTunDevice _tun;
 
 	ReaderJob _reader;
 	WriterJob _writer;
+
+	bool _needsConfig = true;
 }
