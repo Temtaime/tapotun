@@ -36,7 +36,7 @@ jobs:
 
       - run: |
           apk update
-          apk add ldc dub clang                    # build tools
+          apk add ldc dub clang llvm               # build tools
           apk add gcc libc++-static                # runtime
           apk add zlib-static linux-headers        # deps
 
