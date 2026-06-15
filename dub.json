@@ -1,7 +1,7 @@
 ﻿{
 	"name": "tapotun",
 	"dependencies": {
-		"utile": ">=1.3.22"
+		"utile": ">=2.0.2"
 	},
 	"buildTypes": {
 		"release-default": {
@@ -34,20 +34,13 @@
 		}
 	},
 	"dflags-linux": [
-		"-static"
+		"-static",
+		"--frame-pointer=none"
 	],
 	"lflags-linux": [
-		"$PACKAGE_DIR/uhttpd/libmicrohttpd_$ARCH.a",
-		"$PACKAGE_DIR/curl/libcurl-impersonate_$ARCH.a",
-		"-lc++abi",
 		"-s"
 	],
 	"dflags-linux-aarch64": [
-		"-static",
-		"--frame-pointer=none",
 		"-mcpu=cortex-a53"
-	],
-	"libs-windows": [
-		"$PACKAGE_DIR/uhttpd/uhttpd"
 	]
 }
