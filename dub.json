@@ -10,6 +10,20 @@
 		"CC": "clang -fuse-ld=lld -w"
 	},
 	"buildTypes": {
+		"release-default": {
+			"buildOptions": [
+				"releaseMode",
+				"inline",
+				"noBoundsCheck"
+			],
+			"dflags": [
+				"-O3",
+				"--frame-pointer=none"
+			],
+			"lflags-linux": [
+				"-s"
+			]
+		},
 		"release-lto": {
 			"buildOptions": [
 				"releaseMode",

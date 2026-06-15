@@ -41,7 +41,7 @@ jobs:
           apk add zlib-static linux-headers        # deps
 
       - run: |
-          dub build -a ${{ matrix.arch }} -b release-lto
+          dub build -a ${{ matrix.arch }} -b release-default
           mv tapotun tapotun_$(uname -m)
 
       - uses: actions/upload-artifact@v4
