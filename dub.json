@@ -6,6 +6,9 @@
 		"utile:web": "*",
 		"utile:curl": "*"
 	},
+	"environments": {
+		"CC": "clang -fuse-ld=lld -w"
+	},
 	"buildTypes": {
 		"release-default": {
 			"buildOptions": [

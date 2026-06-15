@@ -36,11 +36,11 @@ jobs:
 
       - run: |
           apk update
-          apk add ldc dub clang gcc libc++-static       # build tools
-          apk add zlib-static linux-headers             # deps
+          apk add ldc dub #clang                    # build tools
+          apk add gcc libc++-static                # runtime
+          apk add zlib-static linux-headers        # deps
 
       - run: |
-          export CC="clang -fuse-ld=lld -w"
           dub build -a ${{ matrix.arch }} -b release-default
           mv tapotun tapotun_$(uname -m)
 
