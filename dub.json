@@ -6,6 +6,9 @@
 		"utile:web": "*",
 		"utile:curl": "*"
 	},
+	"environments": {
+		"CC": "clang -fuse-ld=lld -w"
+	},
 	"buildTypes": {
 		"release-default": {
 			"buildOptions": [
@@ -14,7 +17,8 @@
 				"noBoundsCheck"
 			],
 			"dflags": [
-				"-O3"
+				"-O3",
+				"--frame-pointer=none"
 			],
 			"lflags-linux": [
 				"-s"
@@ -27,20 +31,20 @@
 				"noBoundsCheck"
 			],
 			"dflags": [
-				"-O3"
+				"-O3",
+				"--frame-pointer=none"
 			],
-			"dflags-linux-aarch64": [
+			"dflags-linux": [
 				"-flto=full"
 			],
-			"lflags-linux-aarch64": [
+			"lflags-linux": [
 				"--lto=full",
 				"--lto-O3"
 			]
 		}
 	},
 	"dflags-linux": [
-		"-static",
-		"--frame-pointer=none"
+		"-static"
 	],
 	"dflags-linux-aarch64": [
 		"-mcpu=cortex-a53"
